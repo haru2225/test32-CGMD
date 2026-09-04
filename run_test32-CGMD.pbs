@@ -1,0 +1,83 @@
+#!/bin/bash
+# Submit this file from DM2/demo/demo_generating:
+#   qsub run_test32-CGMD.pbs
+# Replace projectname below with the ProjectGroup ID shown by `listu`.
+#PBS -q sg8
+#PBS -P projectname
+#PBS -N test32_cgmd
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=8:mpiprocs=1:ompthreads=8:mem=32gb:ngpus=1
+#PBS -j oe
+
+set -eu
+
+cd "$PBS_O_WORKDIR"
+
+. /etc/profile.d/modules.sh
+module purge
+module load cuda/12.4
+
+DM2_ROOT="$(cd ../.. && pwd)"
+SIF_IMAGE="${SIF_IMAGE:-$PBS_O_WORKDIR/test32-cgmd-pytorch-2.5.0-cu124.sif}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PBS_O_WORKDIR/test32-CGMD-output}"
+
+# test32-CGMD is generation-only: it requires test32.py's trained state dict.
+# Put the checkpoint at DM2/demo/model/test32_sio2_glass_nequip.pt, or pass
+# another host path with qsub -v CHECKPOINT_PATH=/absolute/path/model.pt.
+CHECKPOINT_PATH="${CHECKPOINT_PATH:-$DM2_ROOT/demo/model/test32_sio2_glass_nequip.pt}"
+INPUT_PATH="${INPUT_PATH:-$DM2_ROOT/demo/demo_training/simu_data/sio2_3000_glass_1k_sample0.dat}"
+GEN_NOISY_STEPS="${GEN_NOISY_STEPS:-2900}"
+GEN_POLISH_STEPS="${GEN_POLISH_STEPS:-100}"
+GEN_CHECKPOINT_STEPS="${GEN_CHECKPOINT_STEPS:-100}"
+TIME_BUDGET_HOURS="${TIME_BUDGET_HOURS:-11.5}"
+JOB_NCPUS="${PBS_NCPUS:-8}"
+
+if [ ! -r "$SIF_IMAGE" ]; then
+    echo "ERROR: Singularity image is not readable: $SIF_IMAGE" >&2
+    echo "Build it first with:" >&2
+    echo "  singularity build $SIF_IMAGE Singularity.test32-CGMD.def" >&2
+    exit 1
+fi
+
+if [ ! -r "$CHECKPOINT_PATH" ]; then
+    echo "ERROR: trained test32 checkpoint is not readable: $CHECKPOINT_PATH" >&2
+    echo "Copy test32_sio2_glass_nequip.pt there or set CHECKPOINT_PATH with qsub -v." >&2
+    exit 1
+fi
+
+if [ ! -r "$INPUT_PATH" ]; then
+    echo "ERROR: input structure is not readable: $INPUT_PATH" >&2
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+
+export SINGULARITYENV_DM2_ROOT="$DM2_ROOT"
+export SINGULARITYENV_PYTHONPATH="$DM2_ROOT/src"
+export SINGULARITYENV_MPLBACKEND=Agg
+export SINGULARITYENV_PYTHONUNBUFFERED=1
+export SINGULARITYENV_PYTHONNOUSERSITE=1
+export SINGULARITYENV_OMP_NUM_THREADS="$JOB_NCPUS"
+
+echo "Starting test32-CGMD on $(hostname) at $(date)"
+echo "DM2_ROOT=$DM2_ROOT"
+echo "OUTPUT_DIR=$OUTPUT_DIR"
+echo "CHECKPOINT_PATH=$CHECKPOINT_PATH"
+echo "GEN_STEPS=$GEN_NOISY_STEPS+$GEN_POLISH_STEPS"
+
+singularity exec --nv \
+    --bind "$DM2_ROOT:$DM2_ROOT" \
+    --bind "$(dirname "$CHECKPOINT_PATH"):$(dirname "$CHECKPOINT_PATH")" \
+    --bind "$(dirname "$INPUT_PATH"):$(dirname "$INPUT_PATH")" \
+    --pwd "$PBS_O_WORKDIR" \
+    "$SIF_IMAGE" \
+    python -u "$PBS_O_WORKDIR/test32-CGMD.py" \
+        --checkpoint "$CHECKPOINT_PATH" \
+        --input "$INPUT_PATH" \
+        --output-dir "$OUTPUT_DIR" \
+        --gen-noisy-steps "$GEN_NOISY_STEPS" \
+        --gen-polish-steps "$GEN_POLISH_STEPS" \
+        --generation-checkpoint-steps "$GEN_CHECKPOINT_STEPS" \
+        --time-budget-hours "$TIME_BUDGET_HOURS"
+
+echo "Finished test32-CGMD at $(date)"
