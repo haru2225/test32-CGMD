@@ -1,6 +1,8 @@
 #!/bin/bash
-# Submit this file from DM2/demo/demo_generating:
+# If these files are inside DM2/demo/demo_generating:
 #   qsub run_test32-CGMD.pbs
+# If this three-file repository was cloned separately:
+#   qsub -v DM2_ROOT=/absolute/path/to/DM2 run_test32-CGMD.pbs
 # Replace projectname below with the ProjectGroup ID shown by `listu`.
 #PBS -q sg8
 #PBS -P projectname
@@ -17,7 +19,7 @@ cd "$PBS_O_WORKDIR"
 module purge
 module load cuda/12.4
 
-DM2_ROOT="$(cd ../.. && pwd)"
+DM2_ROOT="${DM2_ROOT:-$(cd ../.. && pwd)}"
 SIF_IMAGE="${SIF_IMAGE:-$PBS_O_WORKDIR/test32-cgmd-pytorch-2.5.0-cu124.sif}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PBS_O_WORKDIR/test32-CGMD-output}"
 
