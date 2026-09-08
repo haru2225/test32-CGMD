@@ -56,8 +56,9 @@ resolve_file() {
 }
 
 if [[ -n "${DM2_ROOT:-}" ]]; then
-    DM2_ROOT="$(resolve_directory "$DM2_ROOT")" || {
-        echo "ERROR: DM2_ROOT is not a directory: $DM2_ROOT" >&2
+    requested_dm2_root="$DM2_ROOT"
+    DM2_ROOT="$(resolve_directory "$requested_dm2_root")" || {
+        echo "ERROR: DM2_ROOT is not a directory: $requested_dm2_root" >&2
         exit 2
     }
 else
@@ -81,8 +82,9 @@ if [[ -z "$DM2_ROOT" || ! -d "$DM2_ROOT/src/graphite" ]]; then
 fi
 
 SCRIPT_PATH="${SCRIPT_PATH:-$WORK_DIR/test32-CGMD.py}"
-SCRIPT_PATH="$(resolve_file "$SCRIPT_PATH")" || {
-    echo "ERROR: Python driver parent directory does not exist: $SCRIPT_PATH" >&2
+requested_script_path="$SCRIPT_PATH"
+SCRIPT_PATH="$(resolve_file "$requested_script_path")" || {
+    echo "ERROR: Python driver parent directory does not exist: $requested_script_path" >&2
     exit 2
 }
 if [[ ! -r "$SCRIPT_PATH" ]]; then
@@ -92,8 +94,9 @@ if [[ ! -r "$SCRIPT_PATH" ]]; then
 fi
 
 SIF_IMAGE="${SIF_IMAGE:-$WORK_DIR/test32-cgmd-pytorch-2.5.0-cu124.sif}"
-SIF_IMAGE="$(resolve_file "$SIF_IMAGE")" || {
-    echo "ERROR: Singularity image parent directory does not exist: $SIF_IMAGE" >&2
+requested_sif_image="$SIF_IMAGE"
+SIF_IMAGE="$(resolve_file "$requested_sif_image")" || {
+    echo "ERROR: Singularity image parent directory does not exist: $requested_sif_image" >&2
     exit 2
 }
 
@@ -113,14 +116,17 @@ if [[ -z "${CHECKPOINT_PATH:-}" ]]; then
     done
 fi
 CHECKPOINT_PATH="${CHECKPOINT_PATH:-$WORK_DIR/checkpoints/test32_sio2_glass_nequip.pt}"
-CHECKPOINT_PATH="$(resolve_file "$CHECKPOINT_PATH")" || {
-    echo "ERROR: checkpoint parent directory does not exist: $CHECKPOINT_PATH" >&2
+requested_checkpoint_path="$CHECKPOINT_PATH"
+CHECKPOINT_PATH="$(resolve_file "$requested_checkpoint_path")" || {
+    echo "ERROR: checkpoint parent directory does not exist: $requested_checkpoint_path" >&2
+    echo "Create its parent directory or set CHECKPOINT_PATH to the existing model file." >&2
     exit 2
 }
 
 INPUT_PATH="${INPUT_PATH:-$DM2_ROOT/demo/demo_training/simu_data/sio2_3000_glass_1k_sample0.dat}"
-INPUT_PATH="$(resolve_file "$INPUT_PATH")" || {
-    echo "ERROR: input parent directory does not exist: $INPUT_PATH" >&2
+requested_input_path="$INPUT_PATH"
+INPUT_PATH="$(resolve_file "$requested_input_path")" || {
+    echo "ERROR: input parent directory does not exist: $requested_input_path" >&2
     exit 2
 }
 
