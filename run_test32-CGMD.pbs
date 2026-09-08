@@ -141,7 +141,7 @@ for required in "$SIF_IMAGE" "$CHECKPOINT_PATH" "$INPUT_PATH"; do
             echo "Copy test32_sio2_glass_nequip.pt into ./checkpoints/ or set CHECKPOINT_PATH." >&2
         elif [[ "$required" == "$SIF_IMAGE" ]]; then
             echo "Build it with:" >&2
-            echo "  singularity build $SIF_IMAGE $WORK_DIR/Singularity.test32-CGMD.def" >&2
+            echo "  singularity build --force $SIF_IMAGE $WORK_DIR/Singularity.test32-CGMD.def" >&2
         fi
         exit 2
     fi

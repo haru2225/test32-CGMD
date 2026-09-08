@@ -18,10 +18,13 @@ work/
 Build the container from the `test32-CGMD` directory:
 
 ```bash
-singularity build --fakeroot \
+singularity build --force --fakeroot \
   test32-cgmd-pytorch-2.5.0-cu124.sif \
   Singularity.test32-CGMD.def
 ```
+
+Rebuild the image with this command after pulling dependency changes. An
+existing image does not change when the definition file is updated.
 
 Replace `<ProjectGroup_ID>` with the ID reported by the site's `listu`
 command and submit from the repository directory:
