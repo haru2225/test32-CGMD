@@ -15,7 +15,8 @@ From: pytorch/pytorch:2.5.0-cuda12.4-cudnn9-runtime
         "scikit-learn>=1.3,<2" \
         "scipy>=1.10,<2" \
         "torch-geometric>=2.5,<3" \
-        "tqdm>=4.65,<5"
+        "tqdm>=4.65,<5" \
+        "lammps>=2024.8.0"
 
 %environment
     export MPLBACKEND=Agg
@@ -26,4 +27,4 @@ From: pytorch/pytorch:2.5.0-cuda12.4-cudnn9-runtime
     exec python "$@"
 
 %test
-    python -c "import torch, numpy, pandas, ase, e3nn, matplotlib, sklearn, scipy, torch_geometric; print('torch:', torch.__version__); print('CUDA build:', torch.version.cuda)"
+    python -c "import torch, numpy, pandas, ase, e3nn, matplotlib, sklearn, scipy, torch_geometric, lammps; print('torch:', torch.__version__); print('CUDA build:', torch.version.cuda)"

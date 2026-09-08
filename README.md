@@ -48,3 +48,22 @@ automatically. Both SingularityCE and Apptainer are supported.
 
 Generation restart data is written periodically. If a job reaches its time
 budget, submit the same command again to resume.
+
+## LAMMPS score-force field
+
+After generation, build a CG score-force bundle on the supercomputer:
+
+```bash
+qsub -P <ProjectGroup_ID> run_test32-forcefield.pbs
+```
+
+This writes `forcefields/cg_score_forcefield.pt`, a JSON sidecar, and
+`cg_start.data`. The callback can be run with
+`python test32_lammps.py --bundle forcefields/cg_score_forcefield.pt`.
+For the original all-atom checkpoint, use
+`python test32_forcefield.py export-aa --checkpoint ... --input ...`.
+
+The callback applies `F = kBT(-dx/sigma_ref^2)` in LAMMPS `metal` units and
+requires one MPI rank. It supplies no energy or virial, so use NVT/Langevin
+only. Because test32 is sigma-agnostic and the CG input is a denoising (not
+equilibrium) trajectory, this output is experimental and requires validation.

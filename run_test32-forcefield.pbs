@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Build a force bundle from test32-CGMD-output. Submit with qsub -P <group>.
+# Set RUN_LAMMPS=1 to run LAMMPS after export.
+#PBS -q sg8
+#PBS -N test32_forcefield
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=8:mpiprocs=1:ompthreads=8:mem=32gb:ngpus=1
+#PBS -j oe
+set -euo pipefail
+WORK_DIR="$(cd "${PBS_O_WORKDIR:?}" && pwd -P)"
+cd "$WORK_DIR"
+SIF_IMAGE="${SIF_IMAGE:-$WORK_DIR/test32-cgmd-pytorch-2.5.0-cu124.sif}"
+OUTPUT_DIR="${OUTPUT_DIR:-$WORK_DIR/forcefields}"
+CG_OUTPUT="${CG_OUTPUT:-$WORK_DIR/test32-CGMD-output}"
+UPDATES="${UPDATES:-30000}"
+RUNTIME="${CONTAINER_RUNTIME:-singularity}"
+command -v "$RUNTIME" >/dev/null 2>&1 || { echo "ERROR: runtime not found: $RUNTIME" >&2; exit 2; }
+[[ -r "$SIF_IMAGE" ]] || { echo "ERROR: SIF_IMAGE not readable: $SIF_IMAGE" >&2; exit 2; }
+mkdir -p "$OUTPUT_DIR"
+common=("$RUNTIME" exec --nv --bind "$WORK_DIR:$WORK_DIR" --pwd "$WORK_DIR" "$SIF_IMAGE")
+"${common[@]}" python -u "$WORK_DIR/test32_forcefield.py" train-cg --positions "$CG_OUTPUT/positions.npy" --manifest "$CG_OUTPUT/manifest.npz" --output-dir "$OUTPUT_DIR" --updates "$UPDATES" --device auto
+if [[ "${RUN_LAMMPS:-0}" == 1 ]]; then
+  "${common[@]}" python -u "$WORK_DIR/test32_lammps.py" --bundle "$OUTPUT_DIR/cg_score_forcefield.pt" --output-dir "$WORK_DIR/lammps-output"
+fi
