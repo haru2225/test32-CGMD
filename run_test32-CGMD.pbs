@@ -1,85 +1,222 @@
-#!/bin/bash
-# If these files are inside DM2/demo/demo_generating:
-#   qsub run_test32-CGMD.pbs
-# If this three-file repository was cloned separately:
-#   qsub -v DM2_ROOT=/absolute/path/to/DM2 run_test32-CGMD.pbs
-# Replace projectname below with the ProjectGroup ID shown by `listu`.
+#!/usr/bin/env bash
+# Submit from this repository directory. The project ID is site/user specific,
+# so it is intentionally not hard-coded here:
+#   qsub -P <ProjectGroup_ID> run_test32-CGMD.pbs
+#
+# Recommended supercomputer layout:
+#   /path/to/work/test32-CGMD/       (this repository)
+#   /path/to/work/DM2/               (DM2 repository)
+#   /path/to/work/checkpoints/test32_sio2_glass_nequip.pt
+#
+# DM2_ROOT, CHECKPOINT_PATH, INPUT_PATH, SIF_IMAGE, and OUTPUT_DIR may be
+# overridden with qsub -v. External directories are bound into the container.
 #PBS -q sg8
-#PBS -P projectname
 #PBS -N test32_cgmd
 #PBS -l walltime=12:00:00
 #PBS -l select=1:ncpus=8:mpiprocs=1:ompthreads=8:mem=32gb:ngpus=1
 #PBS -j oe
 
-set -eu
+set -euo pipefail
 
-cd "$PBS_O_WORKDIR"
+if [[ -z "${PBS_O_WORKDIR:-}" ]]; then
+    echo "ERROR: PBS_O_WORKDIR is unset. Submit this file with qsub." >&2
+    exit 2
+fi
 
-. /etc/profile.d/modules.sh
-module purge
-module load cuda/12.4
+WORK_DIR="$(cd "$PBS_O_WORKDIR" && pwd -P)"
+cd "$WORK_DIR"
 
-DM2_ROOT="${DM2_ROOT:-$(cd ../.. && pwd)}"
-SIF_IMAGE="${SIF_IMAGE:-$PBS_O_WORKDIR/test32-cgmd-pytorch-2.5.0-cu124.sif}"
-OUTPUT_DIR="${OUTPUT_DIR:-$PBS_O_WORKDIR/test32-CGMD-output}"
+# sg8 provides CUDA through environment modules. Set CUDA_MODULE to an empty
+# string if a site configures the GPU driver without a CUDA module.
+CUDA_MODULE="${CUDA_MODULE-cuda/12.4}"
+if [[ -n "$CUDA_MODULE" ]]; then
+    if [[ -r /etc/profile.d/modules.sh ]]; then
+        # shellcheck source=/dev/null
+        . /etc/profile.d/modules.sh
+    fi
+    if ! command -v module >/dev/null 2>&1; then
+        echo "ERROR: environment modules are unavailable; set CUDA_MODULE= to skip module loading." >&2
+        exit 2
+    fi
+    module purge
+    module load "$CUDA_MODULE"
+fi
 
-# test32-CGMD is generation-only: it requires test32.py's trained state dict.
-# Put the checkpoint at DM2/demo/model/test32_sio2_glass_nequip.pt, or pass
-# another host path with qsub -v CHECKPOINT_PATH=/absolute/path/model.pt.
-CHECKPOINT_PATH="${CHECKPOINT_PATH:-$DM2_ROOT/demo/model/test32_sio2_glass_nequip.pt}"
+resolve_directory() {
+    local directory="$1"
+    [[ -d "$directory" ]] || return 1
+    (cd "$directory" && pwd -P)
+}
+
+resolve_file() {
+    local file="$1"
+    local directory
+    directory="$(resolve_directory "$(dirname "$file")")" || return 1
+    printf '%s/%s\n' "$directory" "$(basename "$file")"
+}
+
+if [[ -n "${DM2_ROOT:-}" ]]; then
+    DM2_ROOT="$(resolve_directory "$DM2_ROOT")" || {
+        echo "ERROR: DM2_ROOT is not a directory: $DM2_ROOT" >&2
+        exit 2
+    }
+else
+    DM2_ROOT=""
+    for candidate in \
+        "$WORK_DIR/DM2" \
+        "$WORK_DIR/../DM2" \
+        "$WORK_DIR/../.."; do
+        if [[ -d "$candidate/src/graphite" ]]; then
+            DM2_ROOT="$(resolve_directory "$candidate")"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$DM2_ROOT" || ! -d "$DM2_ROOT/src/graphite" ]]; then
+    echo "ERROR: could not find DM2/src/graphite." >&2
+    echo "Clone DM2 next to this repository or submit with:" >&2
+    echo "  qsub -P <ProjectGroup_ID> -v DM2_ROOT=/absolute/path/to/DM2 run_test32-CGMD.pbs" >&2
+    exit 2
+fi
+
+SCRIPT_PATH="${SCRIPT_PATH:-$WORK_DIR/test32-CGMD.py}"
+SCRIPT_PATH="$(resolve_file "$SCRIPT_PATH")" || {
+    echo "ERROR: Python driver parent directory does not exist: $SCRIPT_PATH" >&2
+    exit 2
+}
+if [[ ! -r "$SCRIPT_PATH" ]]; then
+    echo "ERROR: Python driver is not readable: $SCRIPT_PATH" >&2
+    echo "Submit qsub from the cloned test32-CGMD repository directory." >&2
+    exit 2
+fi
+
+SIF_IMAGE="${SIF_IMAGE:-$WORK_DIR/test32-cgmd-pytorch-2.5.0-cu124.sif}"
+SIF_IMAGE="$(resolve_file "$SIF_IMAGE")" || {
+    echo "ERROR: Singularity image parent directory does not exist: $SIF_IMAGE" >&2
+    exit 2
+}
+
+# test32-CGMD only generates data and needs test32.py's trained state dict.
+# Search common layouts, while always preferring an explicitly supplied path.
+if [[ -z "${CHECKPOINT_PATH:-}" ]]; then
+    for candidate in \
+        "$WORK_DIR/checkpoints/test32_sio2_glass_nequip.pt" \
+        "$WORK_DIR/test32_sio2_glass_nequip.pt" \
+        "$WORK_DIR/../checkpoints/test32_sio2_glass_nequip.pt" \
+        "$DM2_ROOT/demo/model/test32_sio2_glass_nequip.pt" \
+        "$DM2_ROOT/../checkpoints/test32_sio2_glass_nequip.pt"; do
+        if [[ -r "$candidate" ]]; then
+            CHECKPOINT_PATH="$candidate"
+            break
+        fi
+    done
+fi
+CHECKPOINT_PATH="${CHECKPOINT_PATH:-$WORK_DIR/checkpoints/test32_sio2_glass_nequip.pt}"
+CHECKPOINT_PATH="$(resolve_file "$CHECKPOINT_PATH")" || {
+    echo "ERROR: checkpoint parent directory does not exist: $CHECKPOINT_PATH" >&2
+    exit 2
+}
+
 INPUT_PATH="${INPUT_PATH:-$DM2_ROOT/demo/demo_training/simu_data/sio2_3000_glass_1k_sample0.dat}"
+INPUT_PATH="$(resolve_file "$INPUT_PATH")" || {
+    echo "ERROR: input parent directory does not exist: $INPUT_PATH" >&2
+    exit 2
+}
+
+OUTPUT_DIR="${OUTPUT_DIR:-$WORK_DIR/test32-CGMD-output}"
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(resolve_directory "$OUTPUT_DIR")"
+
+for required in "$SIF_IMAGE" "$CHECKPOINT_PATH" "$INPUT_PATH"; do
+    if [[ ! -r "$required" ]]; then
+        echo "ERROR: required file is not readable: $required" >&2
+        if [[ "$required" == "$CHECKPOINT_PATH" ]]; then
+            echo "Copy test32_sio2_glass_nequip.pt into ./checkpoints/ or set CHECKPOINT_PATH." >&2
+        elif [[ "$required" == "$SIF_IMAGE" ]]; then
+            echo "Build it with:" >&2
+            echo "  singularity build $SIF_IMAGE $WORK_DIR/Singularity.test32-CGMD.def" >&2
+        fi
+        exit 2
+    fi
+done
+
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-}"
+if [[ -z "$CONTAINER_RUNTIME" ]]; then
+    if command -v singularity >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="singularity"
+    elif command -v apptainer >/dev/null 2>&1; then
+        CONTAINER_RUNTIME="apptainer"
+    else
+        echo "ERROR: neither singularity nor apptainer is available." >&2
+        exit 2
+    fi
+elif ! command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1; then
+    echo "ERROR: container runtime is not executable: $CONTAINER_RUNTIME" >&2
+    exit 2
+fi
+
 GEN_NOISY_STEPS="${GEN_NOISY_STEPS:-2900}"
 GEN_POLISH_STEPS="${GEN_POLISH_STEPS:-100}"
 GEN_CHECKPOINT_STEPS="${GEN_CHECKPOINT_STEPS:-100}"
 TIME_BUDGET_HOURS="${TIME_BUDGET_HOURS:-11.5}"
 JOB_NCPUS="${PBS_NCPUS:-8}"
 
-if [ ! -r "$SIF_IMAGE" ]; then
-    echo "ERROR: Singularity image is not readable: $SIF_IMAGE" >&2
-    echo "Build it first with:" >&2
-    echo "  singularity build $SIF_IMAGE Singularity.test32-CGMD.def" >&2
-    exit 1
-fi
+# SingularityCE reads SINGULARITYENV_*, while Apptainer prefers
+# APPTAINERENV_*; exporting both is harmless.
+for prefix in SINGULARITYENV APPTAINERENV; do
+    export "${prefix}_DM2_ROOT=$DM2_ROOT"
+    export "${prefix}_PYTHONPATH=$DM2_ROOT/src"
+    export "${prefix}_MPLBACKEND=Agg"
+    export "${prefix}_PYTHONUNBUFFERED=1"
+    export "${prefix}_PYTHONNOUSERSITE=1"
+    export "${prefix}_OMP_NUM_THREADS=$JOB_NCPUS"
+done
 
-if [ ! -r "$CHECKPOINT_PATH" ]; then
-    echo "ERROR: trained test32 checkpoint is not readable: $CHECKPOINT_PATH" >&2
-    echo "Copy test32_sio2_glass_nequip.pt there or set CHECKPOINT_PATH with qsub -v." >&2
-    exit 1
-fi
+# Bind DM2 first, then add only directories outside already bound trees.
+bind_paths=("$DM2_ROOT")
+append_bind_if_outside() {
+    local directory="$1"
+    local covered
+    for covered in "${bind_paths[@]}"; do
+        if [[ "$directory" == "$covered" || "$directory" == "$covered/"* ]]; then
+            return
+        fi
+    done
+    bind_paths+=("$directory")
+}
+append_bind_if_outside "$WORK_DIR"
+append_bind_if_outside "$(dirname "$CHECKPOINT_PATH")"
+append_bind_if_outside "$(dirname "$INPUT_PATH")"
+append_bind_if_outside "$OUTPUT_DIR"
 
-if [ ! -r "$INPUT_PATH" ]; then
-    echo "ERROR: input structure is not readable: $INPUT_PATH" >&2
-    exit 1
-fi
-
-mkdir -p "$OUTPUT_DIR"
-
-export SINGULARITYENV_DM2_ROOT="$DM2_ROOT"
-export SINGULARITYENV_PYTHONPATH="$DM2_ROOT/src"
-export SINGULARITYENV_MPLBACKEND=Agg
-export SINGULARITYENV_PYTHONUNBUFFERED=1
-export SINGULARITYENV_PYTHONNOUSERSITE=1
-export SINGULARITYENV_OMP_NUM_THREADS="$JOB_NCPUS"
+container_command=("$CONTAINER_RUNTIME" exec --nv)
+for bind_path in "${bind_paths[@]}"; do
+    container_command+=(--bind "$bind_path:$bind_path")
+done
+container_command+=(
+    --pwd "$WORK_DIR"
+    "$SIF_IMAGE"
+    python -u "$SCRIPT_PATH"
+    --checkpoint "$CHECKPOINT_PATH"
+    --input "$INPUT_PATH"
+    --output-dir "$OUTPUT_DIR"
+    --gen-noisy-steps "$GEN_NOISY_STEPS"
+    --gen-polish-steps "$GEN_POLISH_STEPS"
+    --generation-checkpoint-steps "$GEN_CHECKPOINT_STEPS"
+    --time-budget-hours "$TIME_BUDGET_HOURS"
+)
 
 echo "Starting test32-CGMD on $(hostname) at $(date)"
+echo "WORK_DIR=$WORK_DIR"
 echo "DM2_ROOT=$DM2_ROOT"
-echo "OUTPUT_DIR=$OUTPUT_DIR"
+echo "CONTAINER_RUNTIME=$CONTAINER_RUNTIME"
+echo "SIF_IMAGE=$SIF_IMAGE"
 echo "CHECKPOINT_PATH=$CHECKPOINT_PATH"
+echo "INPUT_PATH=$INPUT_PATH"
+echo "OUTPUT_DIR=$OUTPUT_DIR"
 echo "GEN_STEPS=$GEN_NOISY_STEPS+$GEN_POLISH_STEPS"
 
-singularity exec --nv \
-    --bind "$DM2_ROOT:$DM2_ROOT" \
-    --bind "$(dirname "$CHECKPOINT_PATH"):$(dirname "$CHECKPOINT_PATH")" \
-    --bind "$(dirname "$INPUT_PATH"):$(dirname "$INPUT_PATH")" \
-    --pwd "$PBS_O_WORKDIR" \
-    "$SIF_IMAGE" \
-    python -u "$PBS_O_WORKDIR/test32-CGMD.py" \
-        --checkpoint "$CHECKPOINT_PATH" \
-        --input "$INPUT_PATH" \
-        --output-dir "$OUTPUT_DIR" \
-        --gen-noisy-steps "$GEN_NOISY_STEPS" \
-        --gen-polish-steps "$GEN_POLISH_STEPS" \
-        --generation-checkpoint-steps "$GEN_CHECKPOINT_STEPS" \
-        --time-budget-hours "$TIME_BUDGET_HOURS"
+"${container_command[@]}"
 
 echo "Finished test32-CGMD at $(date)"

@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import time
 import warnings
 from functools import partial
@@ -36,6 +37,36 @@ from sklearn.preprocessing import LabelEncoder
 from torch import nn
 from torch_geometric.data import Data
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+def find_dm2_root() -> Path:
+    """Resolve DM2 for both a standalone clone and an in-tree script copy."""
+    configured = os.environ.get("DM2_ROOT")
+    if configured:
+        candidates = [Path(configured).expanduser()]
+    else:
+        candidates = [
+            SCRIPT_DIR / "DM2",
+            SCRIPT_DIR.parent / "DM2",
+            SCRIPT_DIR.parents[1],
+        ]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if (resolved / "src" / "graphite").is_dir():
+            return resolved
+    searched = "\n  ".join(str(path.resolve()) for path in candidates)
+    raise RuntimeError(
+        "Could not find DM2/src/graphite. Set DM2_ROOT to the cloned DM2 repository.\n"
+        f"Searched:\n  {searched}"
+    )
+
+
+DM2_ROOT = find_dm2_root()
+DM2_SRC = str(DM2_ROOT / "src")
+if DM2_SRC not in sys.path:
+    sys.path.insert(0, DM2_SRC)
+
 if hasattr(torch.serialization, "add_safe_globals"):
     torch.serialization.add_safe_globals([slice])
 
@@ -46,10 +77,18 @@ from graphite.nn.models.e3nn_nequip import NequIP
 warnings.filterwarnings("ignore", category=UserWarning, message="TypedStorage is deprecated")
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.jit._check")
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DM2_ROOT = Path(os.environ.get("DM2_ROOT", SCRIPT_DIR.parents[1])).resolve()
 DEFAULT_INPUT = DM2_ROOT / "demo" / "demo_training" / "simu_data" / "sio2_3000_glass_1k_sample0.dat"
-DEFAULT_CHECKPOINT = DM2_ROOT / "demo" / "model" / "test32_sio2_glass_nequip.pt"
+CHECKPOINT_CANDIDATES = [
+    SCRIPT_DIR / "checkpoints" / "test32_sio2_glass_nequip.pt",
+    SCRIPT_DIR / "test32_sio2_glass_nequip.pt",
+    SCRIPT_DIR.parent / "checkpoints" / "test32_sio2_glass_nequip.pt",
+    DM2_ROOT / "demo" / "model" / "test32_sio2_glass_nequip.pt",
+    DM2_ROOT.parent / "checkpoints" / "test32_sio2_glass_nequip.pt",
+]
+DEFAULT_CHECKPOINT = next(
+    (path.resolve() for path in CHECKPOINT_CANDIDATES if path.is_file()),
+    CHECKPOINT_CANDIDATES[0].resolve(),
+)
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "test32-CGMD-output"
 
 

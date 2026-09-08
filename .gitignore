@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+*.sif
+test32-CGMD-output/
